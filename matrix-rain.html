@@ -1,0 +1,69 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Matrix Rain — tinker preview v2.6</title>
+<style>
+html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:monospace}
+canvas{position:fixed;inset:0}
+#panel{position:fixed;top:8px;right:8px;z-index:9;background:rgba(0,0,0,.72);border:1px solid #0f0;border-radius:8px;padding:10px 12px;color:#9f9;width:240px}
+#panel h3{margin:0 0 6px;color:#0f0;font-size:13px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 0;font-size:11px}
+.row input[type=range]{width:120px}
+.row .v{width:34px;text-align:right;color:#cfc}
+button{margin-top:6px;width:100%;background:#020;color:#0f0;border:1px solid #0f0;border-radius:6px;padding:4px;cursor:pointer;font-family:monospace}
+</style><style id="card-clean">
+html,body{margin:0!important;padding:0!important;width:100%!important;height:100%!important;overflow:hidden!important;background:#000!important;pointer-events:none!important;cursor:default!important}
+#panel,.panel,#ui,.menubar,.controls,.toolbar,.legend,.hud,.menu,details,form,h1,h2,.title{display:none!important}
+input,label,button,select,textarea{display:none!important}
+.wrap{display:block!important;position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;margin:0!important;padding:0!important;gap:0!important;grid-template-columns:none!important;grid-template-rows:none!important}
+#stage,.stage{position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;margin:0!important;padding:0!important;border:0!important;border-radius:0!important;box-shadow:none!important;max-width:none!important;max-height:none!important}
+#cv,canvas{width:100%!important;height:100%!important;border-radius:0!important;display:block!important}
+</style>
+</head>
+<body><canvas id="c"></canvas>
+<div id="panel"><h3>Matrix Rain — tinker</h3><div id="ctrls"></div>
+<button id="dump">Copy current settings</button><div id="out" style="font-size:10px;color:#6c6;margin-top:6px;word-break:break-all"></div></div>
+<script>
+const GLYPHS="ｦｧｨｩｪｫｬｭｮｯｰｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ0123456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+// UI settings (match the plugin sliders)
+const S={speed:6,density:6,fontSize:18,trail:4,glow:10,bloom:0,flicker:5,morph:0,hue:135,mirror:0,white:0};
+const defs=[["speed",1,10],["density",1,10],["fontSize",10,34],["trail",1,10],["glow",0,24],["bloom",0,24],["flicker",0,20],["morph",0,20],["hue",0,360],["mirror",0,1],["white",0,1]];
+const lerp=(a,b,t)=>a+(b-a)*t, hsl=(h,s,l)=>`hsl(${h} ${s}% ${l}%)`;
+let CFG={};
+function build(){
+  const ms=lerp(8,42,(S.speed-1)/9);
+  CFG.fontSize=S.fontSize; CFG.density=lerp(0.6,2.6,(S.density-1)/9);
+  CFG.minSpeed=ms*0.4; CFG.maxSpeed=ms;
+  CFG.fadeAlpha=lerp(0.18,0.06,(S.trail-1)/9);CFG.tailCells=Math.round(lerp(10,34,(S.trail-1)/9));
+  CFG.headGlow=S.glow; CFG.bloomGlow=S.bloom;
+  CFG.mutateChance=S.flicker/100; CFG.morphChance=S.morph/20; CFG.trailLen=16; CFG.mirror=!!S.mirror;
+  if(S.white){CFG.background="#ffffff";CFG.headColor="#000";CFG.leadColor="#000";CFG.bodyColor="#1a1a1a";CFG.bloomColor="#555";CFG.headGlow=0;CFG.bloomGlow=0;}
+  else{CFG.background="#000000";CFG.headColor=hsl(S.hue,100,88);CFG.leadColor=hsl(S.hue,100,70);CFG.bloomColor=hsl(S.hue,100,55);CFG.bodyColor=hsl(S.hue,100,45);}
+}
+const ctrls=document.getElementById("ctrls");
+defs.forEach(([k,mn,mx])=>{const r=document.createElement("div");r.className="row";
+  r.innerHTML=`<span>${k}</span><input type=range min=${mn} max=${mx} value=${S[k]}><span class=v>${S[k]}</span>`;
+  const inp=r.querySelector("input"),v=r.querySelector(".v");
+  inp.oninput=()=>{S[k]=+inp.value;v.textContent=inp.value;build();resize();};ctrls.appendChild(r);});
+document.getElementById("dump").onclick=()=>{document.getElementById("out").textContent=JSON.stringify(S);};
+
+const cv=document.getElementById("c"),ctx=cv.getContext("2d",{alpha:false});
+let cols,rows,cssW,cssH,drops=[],last=0;
+const rnd=()=>GLYPHS.charAt(Math.random()*GLYPHS.length|0);
+const isK=ch=>{const c=ch.charCodeAt(0);return (c>=0xff66&&c<=0xff9d)||(c>=0x30a0&&c<=0x30ff)};
+const rgb=h=>{if(h[0]!=="#")return[0,0,0];const n=parseInt(h.slice(1).padEnd(6,h.slice(1)),16);return[(n>>16)&255,(n>>8)&255,n&255]};
+function spawn(init){const col=Math.random()*cols|0;const y=init?Math.random()*rows:-Math.random()*rows*0.6-1;return{col,y,speed:CFG.minSpeed+Math.random()*(CFG.maxSpeed-CFG.minSpeed),lastRow:Math.floor(y),prev:rnd()}}
+function glyph(col,row,ch,color,glow){const fs=CFG.fontSize,x=col*fs+fs/2,y=row*fs+fs/2;if(glow>0){ctx.shadowBlur=glow;ctx.shadowColor=color}ctx.fillStyle=color;if(CFG.mirror&&isK(ch)){ctx.save();ctx.translate(x,y);ctx.scale(-1,1);ctx.fillText(ch,0,0);ctx.restore()}else ctx.fillText(ch,x,y);if(glow>0)ctx.shadowBlur=0}
+function clearCell(col,row){const fs=CFG.fontSize;ctx.fillStyle=CFG.background;ctx.fillRect(col*fs-1,row*fs-1,fs+2,fs+2)}
+function head(col,row,ch){if(CFG.bloomGlow>0)glyph(col,row,ch,CFG.bloomColor,CFG.bloomGlow);glyph(col,row,ch,CFG.headColor,CFG.headGlow)}
+function resize(){cssW=cv.width=innerWidth;cssH=cv.height=innerHeight;cols=Math.max(1,Math.floor(cssW/CFG.fontSize));rows=Math.floor(cssH/CFG.fontSize)+1;ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillStyle=CFG.background;ctx.fillRect(0,0,cssW,cssH);drops=[];const n=Math.floor(cols*CFG.density);for(let i=0;i<n;i++)drops.push(spawn(true))}
+function step(dt){const[r,g,b]=rgb(CFG.background);ctx.fillStyle=`rgba(${r},${g},${b},${CFG.fadeAlpha})`;ctx.fillRect(0,0,cssW,cssH);ctx.font=`${CFG.fontSize}px 'Noto Sans CJK JP',monospace`;
+for(const d of drops){d.y+=d.speed*dt;const R=Math.floor(d.y);
+if(R>d.lastRow){if(d.lastRow>=0&&d.lastRow<rows)glyph(d.col,d.lastRow,d.prev,CFG.leadColor,0);for(let k=d.lastRow+1;k<R;k++)if(k>=0&&k<rows)glyph(d.col,k,rnd(),CFG.bodyColor,0);const gg=rnd();d.prev=gg;if(R>=0&&R<rows)head(d.col,R,gg);for(let rr=d.lastRow+1;rr<=R;rr++){const ol=rr-CFG.tailCells;if(ol>=0&&ol<rows)clearCell(d.col,ol)}d.lastRow=R;if(R>rows+1)Object.assign(d,spawn(false))}
+else if(Math.random()<CFG.mutateChance&&R>=0&&R<rows){const gg=rnd();d.prev=gg;head(d.col,R,gg)}
+if(CFG.morphChance>0&&Math.random()<CFG.morphChance){const rr=d.lastRow-(1+(Math.random()*CFG.trailLen|0));if(rr>=0&&rr<rows)glyph(d.col,rr,rnd(),CFG.bodyColor,0)}}}
+function loop(t){const dt=Math.min(0.05,(t-last)/1000);last=t;step(dt);requestAnimationFrame(loop)}
+addEventListener("resize",resize);build();resize();requestAnimationFrame(loop);
+</script><script id="card-resize-kick">
+(function(){function k(){try{window.dispatchEvent(new Event('resize'));}catch(e){}}
+window.addEventListener('load',function(){k();setTimeout(k,60);setTimeout(k,300);setTimeout(k,1000);});
+if(document.readyState!=='loading'){k();setTimeout(k,300);}})();
+</script>
+</body></html>

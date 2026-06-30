@@ -1,0 +1,569 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Floor796-inspired — preview</title>
+<style>
+  html,body{margin:0;height:100%;background:#05070d;overflow:hidden;font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#e7ecf5}
+  #cv{position:fixed;inset:0;width:100vw;height:100vh;display:block;image-rendering:pixelated}
+  #panel{position:fixed;top:12px;right:12px;width:268px;background:rgba(14,18,30,.86);backdrop-filter:blur(6px);
+         border:1px solid #2a3450;border-radius:12px;padding:12px 14px;box-shadow:0 8px 30px #0008;font-size:13px;z-index:10}
+  #panel h1{font-size:14px;margin:0 0 2px;letter-spacing:.3px}
+  #panel .sub{font-size:11px;color:#8ea0c4;margin:0 0 10px;line-height:1.35}
+  .row{display:flex;align-items:center;justify-content:space-between;margin:9px 0;gap:8px}
+  .row label{color:#bcc8e0}
+  .row .val{color:#7fd0c0;min-width:42px;text-align:right;font-variant-numeric:tabular-nums}
+  input[type=range]{width:138px;accent-color:#39c0b0}
+  .sw{position:relative;width:40px;height:22px}
+  .sw input{opacity:0;width:40px;height:22px;margin:0;cursor:pointer}
+  .sw span{position:absolute;inset:0;border-radius:11px;background:#37425e;transition:.15s;pointer-events:none}
+  .sw span:before{content:"";position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:#cdd6ea;transition:.15s}
+  .sw input:checked+span{background:#2c8f84}
+  .sw input:checked+span:before{transform:translateX(18px);background:#eafff9}
+  #json{width:100%;box-sizing:border-box;margin-top:8px;background:#0a0e18;color:#8ea0c4;border:1px solid #243049;border-radius:8px;
+        font:11px ui-monospace,Menlo,Consolas,monospace;padding:7px;resize:vertical;height:62px}
+  #copy{margin-top:6px;width:100%;padding:7px;background:#22324f;color:#dce6ff;border:1px solid #36507e;border-radius:8px;cursor:pointer;font-size:12px}
+  #copy:hover{background:#2c416a}
+  #hint{position:fixed;bottom:10px;left:12px;font-size:11px;color:#5f6f90;z-index:10}
+  #toggleP{position:fixed;top:12px;right:12px;z-index:11;display:none;background:#22324f;color:#dce6ff;border:1px solid #36507e;border-radius:8px;padding:6px 10px;cursor:pointer}
+</style><style id="card-clean">
+html,body{margin:0!important;padding:0!important;width:100%!important;height:100%!important;overflow:hidden!important;background:#000!important;pointer-events:none!important;cursor:default!important}
+#panel,.panel,#ui,.menubar,.controls,.toolbar,.legend,.hud,.menu,details,form,h1,h2,.title{display:none!important}
+input,label,button,select,textarea{display:none!important}
+.wrap{display:block!important;position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;margin:0!important;padding:0!important;gap:0!important;grid-template-columns:none!important;grid-template-rows:none!important}
+#stage,.stage{position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;margin:0!important;padding:0!important;border:0!important;border-radius:0!important;box-shadow:none!important;max-width:none!important;max-height:none!important}
+#cv,canvas{width:100%!important;height:100%!important;border-radius:0!important;display:block!important}
+</style>
+</head><body>
+<canvas id="cv"></canvas>
+<button id="toggleP">controls</button>
+<div id="panel">
+  <h1>Floor796 — preview</h1>
+  <p class="sub">Original pixel reimplementation. Inspired by <b>floor796.com</b> (Pavel Sannikau) — no original assets used. Sliders mirror the planned Quick-Access menu 1:1.</p>
+  <div class="row"><label>Camera pan</label><div class="sw"><input type="checkbox" id="pan" checked><span></span></div></div>
+  <div class="row"><label>Pan speed</label><input type="range" id="panSpeed" min="4" max="40" step="1" value="14"><div class="val" id="vPanSpeed">14</div></div>
+  <div class="row"><label>Liveliness</label><input type="range" id="liveliness" min="0.2" max="2" step="0.1" value="1"><div class="val" id="vLiveliness">1.0</div></div>
+  <div class="row"><label>Pixel size</label><input type="range" id="zoom" min="0.7" max="1.6" step="0.05" value="1"><div class="val" id="vZoom">1.00</div></div>
+  <div class="row"><label>FPS cap</label><input type="range" id="fps" min="15" max="60" step="1" value="30"><div class="val" id="vFps">30</div></div>
+  <div class="row"><label>Stars</label><div class="sw"><input type="checkbox" id="stars" checked><span></span></div></div>
+  <textarea id="json" readonly></textarea>
+  <button id="copy">Copy settings JSON</button>
+</div>
+<div id="hint">Drag sliders to tune. Click “controls” chip if panel hidden. Esc hides/shows panel.</div>
+<script>
+/* Floor796-inspired engine — ORIGINAL pixel art reimplementation.
+ * Inspired by floor796.com by Pavel Sannikau (no original assets used).
+ * One engine, two front-ends: preview HTML and Decky plugin (factory-wrapped).
+ */
+function createFloor796Engine(canvas, cfg, win){
+  win = win || (typeof window!=='undefined'?window:globalThis);
+  var doc = win.document;
+  function mk(w,h){ var c=doc.createElement('canvas'); c.width=w; c.height=h; return c; }
+
+  // ---------- config ----------
+  var DEF = {
+    pan: true,          // camera auto-pan on/off (menu toggle)
+    panSpeed: 14,       // art-px / second
+    liveliness: 1.0,    // character animation speed multiplier
+    zoom: 1.0,          // bigger = chunkier pixels / fewer rooms on screen
+    fps: 30,
+    stars: true
+  };
+  cfg = Object.assign({}, DEF, cfg||{});
+
+  // ---------- art constants (art-pixels) ----------
+  var N = 14;            // rooms in the looping ribbon
+  var ROOM_W = 60, ROOM_H = 50;
+  var WALL = 2, FLOOR_H = 4;
+  var TOP_SPACE = 9, ROOF_H = 7, TOP_MARGIN = TOP_SPACE + ROOF_H;
+  var TARGET_ART_H = 232;
+
+  // ---------- palette ----------
+  var C = {
+    space:'#0a0e1a', space2:'#10162a', star:'#aeb9d6',
+    hullOut:'#171d2b', hull:'#39435c', hullHi:'#525f7c', hullLo:'#262d40',
+    glass:'#8fд', // unused placeholder
+  };
+  var SUITS = ['#e8743b','#39a0c8','#d84b57','#4f63c9','#e6b93a','#8e57c9','#46b06a','#cfd6e0','#d96fa6','#37bdb0'];
+  var SKIN  = ['#f0c39b','#e0a878','#c98a5a','#a8693f','#7d4f33','#8fd6a6'/*alien*/];
+  var HAIR  = ['#2b2b33','#5a3a22','#caa14a','#b03b2e','#cccccc','#3a6ea5'];
+
+  // interior color sets per room type
+  var ROOMS = {
+    lounge:  {wall:'#f1e3c6', wall2:'#e7d3ad', floor:'#b07a48', floorHi:'#c79263'},
+    kitchen: {wall:'#e3e8cf', wall2:'#d2d9b6', floor:'#9aa7ad', floorHi:'#b3bdc2'},
+    gym:     {wall:'#c4d2de', wall2:'#b2c2d1', floor:'#6c7480', floorHi:'#828a96'},
+    pods:    {wall:'#2a3550', wall2:'#222c45', floor:'#1c2238', floorHi:'#283150'},
+    control: {wall:'#14323a', wall2:'#0f2a31', floor:'#0e2025', floorHi:'#143038'},
+    garden:  {wall:'#dff0d6', wall2:'#cde6c2', floor:'#6b4a32', floorHi:'#7d5a3e'},
+    lab:     {wall:'#f2f7fb', wall2:'#e2ecf3', floor:'#aab3bd', floorHi:'#c0c8d1'},
+    corridor:{wall:'#aeb8c6', wall2:'#9da8b8', floor:'#7a838f', floorHi:'#8d96a2'}
+  };
+  var TYPES = ['lounge','lounge','kitchen','kitchen','gym','gym','pods','pods','control','garden','lab','corridor','corridor'];
+
+  // ---------- rng ----------
+  function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; var t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+  function hash(c,d){ var h=(c*73856093)^(d*19349663); return h>>>0; }
+  function pick(rng,arr){ return arr[(rng()*arr.length)|0]; }
+  function ri(rng,a,b){ return a+((rng()*(b-a+1))|0); }
+
+  // ---------- state ----------
+  var ctx=canvas.getContext('2d',{alpha:false});
+  var off, octx, strip, sctx;
+  var PX, artW, artH, decks, stripH, worldW;
+  var rooms=[];        // rooms[col][deck] descriptor
+  var stars=[];
+  var camPos=0, lastT=-1, raf=0, running=false, paused=false;
+
+  function setSmooth(c){ c.imageSmoothingEnabled=false; if('patternQuality' in c) c.patternQuality='nearest'; if('quality' in c) c.quality='nearest'; }
+
+  // ---------- layout ----------
+  function layout(){
+    var cw = canvas.width, ch = canvas.height;
+    PX = Math.max(2, Math.min(7, Math.round(ch / (TARGET_ART_H*cfg.zoom))));
+    artW = Math.ceil(cw/PX); artH = Math.ceil(ch/PX);
+    decks = Math.ceil((artH - TOP_MARGIN)/ROOM_H) + 1;
+    stripH = TOP_MARGIN + decks*ROOM_H;
+    worldW = N*ROOM_W;
+    off = mk(artW, artH); octx = off.getContext('2d',{alpha:false}); setSmooth(octx);
+    strip = mk(worldW, stripH); sctx = strip.getContext('2d',{alpha:true}); setSmooth(sctx);
+    setSmooth(ctx);
+    genWorld();
+    buildStrip();
+    makeStars();
+  }
+
+  function makeStars(){
+    stars=[]; var rng=mulberry32(12345); var n=Math.round(artW/9);
+    for(var i=0;i<n;i++) stars.push({x:rng()*artW, y:rng()*(TOP_SPACE+4), b: rng()<0.3?2:1});
+  }
+
+  // ---------- world generation ----------
+  function genWorld(){
+    rooms=[];
+    for(var c=0;c<N;c++){
+      rooms[c]=[];
+      for(var d=0; d<decks; d++){
+        rooms[c][d]=genRoom(c,d);
+      }
+    }
+  }
+
+  function genRoom(col,deck){
+    var rng=mulberry32(hash(col,deck));
+    var type=TYPES[(rng()*TYPES.length)|0];
+    var floorY = ROOM_H - FLOOR_H;          // local y of floor top
+    var standY = floorY;                    // characters' feet
+    var ags=[];
+    function crew(x,act,opt){
+      opt=opt||{};
+      ags.push({x:x, y: opt.y!=null?opt.y:standY, act:act,
+        suit:pick(rng,SUITS), skin:pick(rng,SKIN), hair:pick(rng,HAIR),
+        dir: opt.dir|| (rng()<0.5?-1:1), ph: rng()*6.28, spd:(0.6+rng()*0.7)*(opt.spd||1),
+        bot: opt.bot||false });
+    }
+    if(type==='lounge'){
+      crew(16,'sit',{dir:1, y: floorY-9}); if(rng()<0.7) crew(26,'sit',{dir:1, y: floorY-9});
+      if(rng()<0.5) crew(48,'walk');
+      if(rng()<0.35) ags.push({pet:true,x:38,y:standY,ph:rng()*6.28,spd:0.8,dir:1,col:pick(rng,['#caa14a','#9a9a9a','#c98a5a'])});
+    } else if(type==='kitchen'){
+      crew(12,'work',{dir:1}); if(rng()<0.7) crew(46,'sit',{dir:-1, y: floorY-5});
+    } else if(type==='gym'){
+      crew(14,'run',{dir:1,spd:1.8}); if(rng()<0.8) crew(40,'lift',{dir:-1});
+    } else if(type==='pods'){
+      crew(18,'sleep',{y: floorY-12, dir:1}); if(rng()<0.7) crew(18,'sleep',{y: floorY-30, dir:1});
+    } else if(type==='control'){
+      crew(16,'work',{dir:1}); if(rng()<0.8) crew(34,'work',{dir:1}); if(rng()<0.4) crew(50,'walk');
+    } else if(type==='garden'){
+      crew(30,'tend',{dir:1}); if(rng()<0.3) crew(48,'walk');
+    } else if(type==='lab'){
+      crew(20,'work',{dir:1}); if(rng()<0.5) crew(42,'work',{dir:-1});
+    } else { // corridor
+      crew(ri(rng,8,24),'walk'); if(rng()<0.8) crew(ri(rng,34,52),'walk');
+      if(rng()<0.25) crew(28,'walk',{bot:true});
+    }
+    return {type:type, ags:ags, v:[rng(),rng(),rng(),rng(),rng(),rng()]};
+  }
+
+  // ---------- scenery ----------
+  function px(g,x,y,w,h,col){ g.fillStyle=col; g.fillRect(x|0,y|0,Math.max(1,w|0),Math.max(1,h|0)); }
+
+  function buildStrip(){
+    sctx.clearRect(0,0,worldW,stripH);
+    // space gradient + stars baked behind roof gaps
+    var grd=sctx.createLinearGradient(0,0,0,TOP_MARGIN);
+    grd.addColorStop(0,C.space); grd.addColorStop(1,C.space2);
+    px(sctx,0,0,worldW,TOP_MARGIN,C.space);
+    sctx.fillStyle=grd; sctx.fillRect(0,0,worldW,TOP_MARGIN);
+    for(var c=0;c<N;c++){
+      drawRoof(c*ROOM_W, 0, c);
+      for(var d=0; d<decks; d++){
+        drawRoom(c*ROOM_W, TOP_MARGIN + d*ROOM_H, rooms[c][d]);
+      }
+    }
+  }
+
+  function drawRoof(ox,oy,col){
+    var rng=mulberry32(hash(col,777));
+    // a few stars in the space band
+    for(var i=0;i<4;i++){ px(sctx, ox+ri(rng,2,ROOM_W-3), oy+ri(rng,0,TOP_SPACE-2), 1,1, C.star); }
+    // antenna / dish on some cols
+    var k=rng();
+    if(k<0.33){ px(sctx, ox+30, oy+2, 1, TOP_SPACE-1, C.hullHi); px(sctx, ox+28,oy+1,5,1,C.hullHi); }
+    else if(k<0.55){ px(sctx, ox+24, oy+3, 8,2, C.hullLo); px(sctx, ox+27,oy+1,2,3,C.hull); } // dish base
+    // roof hull bar
+    px(sctx, ox, oy+TOP_SPACE, ROOM_W, ROOF_H, C.hull);
+    px(sctx, ox, oy+TOP_SPACE, ROOM_W, 1, C.hullHi);
+    px(sctx, ox, oy+TOP_SPACE+ROOF_H-1, ROOM_W, 1, C.hullOut);
+    for(var x2=ox+4;x2<ox+ROOM_W;x2+=10){ px(sctx,x2,oy+TOP_SPACE+2,1,ROOF_H-3,C.hullLo); }
+  }
+
+  function drawRoom(ox,oy,room){
+    var t=room.type, col=ROOMS[t];
+    // hull frame
+    px(sctx, ox,oy, ROOM_W, ROOM_H, C.hull);
+    // interior
+    var ix=ox+WALL, iy=oy+WALL, iw=ROOM_W-WALL*2, ih=ROOM_H-WALL*2;
+    px(sctx, ix,iy, iw,ih, col.wall);
+    // wall shading band
+    px(sctx, ix,iy, iw, Math.floor(ih*0.45), col.wall);
+    px(sctx, ix,iy+Math.floor(ih*0.45), iw, 1, col.wall2);
+    // floor
+    var fy=oy+ROOM_H-FLOOR_H-WALL;
+    px(sctx, ix,fy, iw, FLOOR_H+WALL-WALL, col.floor);
+    px(sctx, ix,fy, iw, 1, col.floorHi);
+    // hull edge highlights
+    px(sctx, ox,oy, ROOM_W,1, C.hullHi);
+    px(sctx, ox,oy, 1,ROOM_H, C.hullHi);
+    px(sctx, ox,oy+ROOM_H-1, ROOM_W,1, C.hullOut);
+    px(sctx, ox+ROOM_W-1,oy, 1,ROOM_H, C.hullOut);
+
+    var floorTop=oy+ROOM_H-FLOOR_H-WALL; // y where things stand
+    var v=room.v;
+    if(t==='lounge') furnLounge(ix,iy,iw,ih,floorTop,v);
+    else if(t==='kitchen') furnKitchen(ix,iy,iw,ih,floorTop,v);
+    else if(t==='gym') furnGym(ix,iy,iw,ih,floorTop,v);
+    else if(t==='pods') furnPods(ix,iy,iw,ih,floorTop,oy,v);
+    else if(t==='control') furnControl(ix,iy,iw,ih,floorTop,v);
+    else if(t==='garden') furnGarden(ix,iy,iw,ih,floorTop,v);
+    else if(t==='lab') furnLab(ix,iy,iw,ih,floorTop,v);
+    else furnCorridor(ix,iy,iw,ih,floorTop,oy,v);
+    if(t==='lounge'||t==='kitchen'||t==='gym'||t==='lab'||t==='corridor') wallDecor(ix,iy,iw,ih,floorTop,v,t);
+  }
+
+  // furniture helpers (draw onto sctx, art coords) ----------
+  function furnLounge(ix,iy,iw,ft,ih,v){
+    // wall TV
+    px(sctx, ix+4, iy+5, 16,10, '#1c2230'); px(sctx, ix+5, iy+6, 14,8, v[0]<0.5?'#3aa0c8':'#c86a3a'); px(sctx, ix+5,iy+6,14,2,'#ffffff22');
+    // sofa
+    var sx=ix+8, sy=ft-9;
+    px(sctx, sx, sy, 26, 9, '#5b6b8c');
+    px(sctx, sx, sy-4, 26, 5, '#6c7ea3'); // back
+    px(sctx, sx, sy+2, 26, 2, '#4a5878');
+    px(sctx, sx-2, sy-1, 3, 8, '#4a5878'); px(sctx, sx+25, sy-1, 3, 8, '#4a5878');
+    // plant
+    px(sctx, ix+iw-6, ft-7, 4,7,'#7a4a2a'); px(sctx, ix+iw-8, ft-13, 8,7,'#3f8f4a');
+  }
+  function furnKitchen(ix,iy,iw,ft,ih,v){
+    // tiled backsplash behind counter
+    px(sctx, ix+2, iy+3, 28, 7, '#dfe6df');
+    for(var tx=ix+2; tx<=ix+30; tx+=4){ px(sctx, tx, iy+3, 1, 7, '#cdd6cd'); }
+    for(var ty=iy+3; ty<=iy+10; ty+=3){ px(sctx, ix+2, ty, 28, 1, '#cdd6cd'); }
+    // hanging cabinets
+    px(sctx, ix+3, iy+2, 22, 3, '#cdb088'); px(sctx, ix+3, iy+2, 22, 1, '#e0c79b');
+    for(var cx=ix+7; cx<ix+25; cx+=6){ px(sctx, cx, iy+3, 1, 2, '#9a7f57'); }
+    // counter + countertop
+    px(sctx, ix+2, ft-8, 28, 8, '#c2925c'); px(sctx, ix+2, ft-9, 28, 2, '#e6e6e6');
+    for(var x=ix+4;x<ix+30;x+=6){ px(sctx,x,ft-6,1,5,'#9a6f3e'); }
+    // stove: 2 burners
+    px(sctx, ix+5, ft-10, 9, 2, '#2c3340'); px(sctx, ix+6, ft-10, 3,1,'#e0533a'); px(sctx, ix+10, ft-10, 3,1,'#e0533a');
+    // sink
+    px(sctx, ix+18, ft-9, 7, 2, '#aeb7c0'); px(sctx, ix+19, ft-9, 5,1,'#7f8a96'); px(sctx, ix+24, ft-12, 1,3,'#8a96a2');
+    // fridge
+    px(sctx, ix+32, ft-19, 8, 19, '#dfe6ea'); px(sctx, ix+32, ft-12, 8, 1, '#b9c3cc'); px(sctx, ix+38, ft-17, 1,4,'#9aa'); px(sctx, ix+38, ft-9, 1,4,'#9aa');
+    // table + 2 stools
+    px(sctx, ix+iw-15, ft-7, 13, 2, '#caa370'); px(sctx, ix+iw-13, ft-5, 1,5,'#8a6a40'); px(sctx, ix+iw-4, ft-5,1,5,'#8a6a40');
+    px(sctx, ix+iw-16, ft-4, 3,1,'#6f7681'); px(sctx, ix+iw-15, ft-3,1,3,'#6f7681');
+  }
+  function furnGym(ix,iy,iw,ft,ih,v){
+    // wall mirror
+    px(sctx, ix+3, iy+3, 12, 12, '#cfe0e6'); px(sctx, ix+3, iy+3, 12, 12, '#b9d2da'); px(sctx, ix+4, iy+4, 4,10,'#dceaef');
+    // treadmill: deck + incline + console + side rails
+    px(sctx, ix+4, ft-3, 16, 3, '#2c3340'); px(sctx, ix+4, ft-3, 16, 1, '#5b6675');
+    px(sctx, ix+18, ft-13, 2, 11, '#39424f');           // console post
+    px(sctx, ix+15, ft-14, 6, 3, '#475264'); px(sctx, ix+16, ft-13, 4,1, '#39d0c0'); // console screen
+    px(sctx, ix+5, ft-9, 1, 7, '#5b6675'); px(sctx, ix+5, ft-9, 9,1, '#5b6675');     // handrail
+    // weight bench + barbell with plates
+    px(sctx, ix+24, ft-5, 14, 2, '#3a4456'); px(sctx, ix+25, ft-3, 1,3,'#2c3340'); px(sctx, ix+36, ft-3,1,3,'#2c3340');
+    px(sctx, ix+22, ft-8, 18, 1, '#9aa3b0');            // barbell bar
+    px(sctx, ix+22, ft-10, 2,5, '#39424f'); px(sctx, ix+38, ft-10, 2,5, '#39424f'); // plates
+    // dumbbell rack
+    px(sctx, ix+iw-12, ft-9, 10, 2, '#555f70'); px(sctx, ix+iw-12, ft-4, 10, 2, '#555f70');
+    for(var i=0;i<3;i++){ px(sctx, ix+iw-11+i*3, ft-9, 2,2,'#39424f'); px(sctx, ix+iw-11+i*3, ft-4,2,2,'#39424f'); }
+  }
+  function furnPods(ix,iy,iw,ft,oy,ih,v){
+    function pod(py){
+      px(sctx, ix+6, py, 30, 9, '#3a4668');
+      px(sctx, ix+6, py+1, 30, 2, '#4a5882');
+      px(sctx, ix+8, py+3, 26, 5, '#11203a');
+      px(sctx, ix+30, py+3, 4,4, '#7fd0e6');
+    }
+    var floorY=ft;
+    pod(floorY-9); pod(floorY-27);
+    px(sctx, ix+2, floorY-29, 1, 29, '#9aa3b0');
+    for(var yy=floorY-27; yy<floorY; yy+=4){ px(sctx, ix+2, yy, 3,1, '#9aa3b0'); }
+  }
+  function furnControl(ix,iy,iw,ft,ih,v){
+    // big wall monitor bezel + screen
+    px(sctx, ix+4, iy+4, 22, 13, '#0b1518'); px(sctx, ix+5, iy+5, 20, 11, '#0c2f38');
+    var mode=(v[2]*4)|0, gx=ix+5, gy=iy+5;
+    if(mode===0){ // radar
+      px(sctx, gx+9, gy+5, 1,1,'#39d0c0'); for(var rr=2;rr<=5;rr+=2){ for(var aa=0;aa<10;aa++){ var an=aa/10*6.283; px(sctx, (gx+9+Math.cos(an)*rr)|0,(gy+5+Math.sin(an)*rr*0.7)|0,1,1,'#1f6f72'); } }
+      px(sctx, gx+9, gy+5, 6,1,'#39d0c0'); px(sctx, gx+13, gy+3,1,1,'#e6b93a');
+    } else if(mode===1){ // bar chart
+      var bh=[3,6,4,8,5,7]; for(var b=0;b<6;b++){ px(sctx, gx+2+b*3, gy+9-bh[b], 2, bh[b], b%2?'#39d0c0':'#2aa0b0'); }
+    } else if(mode===2){ // world map dots
+      for(var d2=0;d2<14;d2++){ px(sctx, gx+2+((v[(d2)%6]*16)|0), gy+2+((v[(d2+1)%6]*8)|0), 1,1,'#39d0c0'); }
+      px(sctx, gx+1, gy+5, 18,1,'#155a60');
+    } else { // waveform
+      for(var w=0;w<18;w++){ var hh=2+((Math.sin(w*0.9+v[0]*6)*2.5+2.5)|0); px(sctx, gx+1+w, gy+5-(hh>>1), 1, hh, '#39d0c0'); }
+    }
+    // side status panel
+    px(sctx, ix+iw-10, iy+5, 7,6,'#0e2a30');
+    for(var li=0;li<3;li++) px(sctx, ix+iw-9, iy+6+li*2, 5,1, [ '#46b06a','#e6b93a','#d84b57'][li]);
+    // console desk + screens
+    px(sctx, ix+4, ft-7, iw-8, 7, '#10262b'); px(sctx, ix+4, ft-8, iw-8, 1, '#1c4a52');
+    var sc=['#39d0c0','#e6b93a','#d84b57','#7fd0e6'];
+    for(var i=0;i<4;i++){ px(sctx, ix+7+i*11, ft-6, 7,4, '#06181c'); px(sctx, ix+8+i*11, ft-5, 5,2, sc[(i+mode)%4]); }
+  }
+  function furnGarden(ix,iy,iw,ft,ih,v){
+    // hanging vine
+    px(sctx, ix+10, iy+2, 1, 8, '#3f8f4a'); px(sctx, ix+9, iy+9, 3,2,'#4fae5a');
+    px(sctx, ix+iw-14, iy+2, 1, 6, '#3f8f4a');
+    // planters
+    var xs=[ix+6, ix+20, ix+34, ix+46];
+    for(var i=0;i<4;i++){ var h=6+((v[i%4]*6)|0); px(sctx, xs[i], ft-4, 8,4,'#7a4a2a'); px(sctx, xs[i]+1, ft-4-h, 6,h, i%2?'#46b06a':'#3f8f4a'); px(sctx,xs[i]+1,ft-4-h,6,1,'#62c777'); }
+  }
+  function furnLab(ix,iy,iw,ft,ih,v){
+    // wall shelf with bottles
+    px(sctx, ix+4, iy+8, 20, 1, '#b9c3cc');
+    var bc=['#d84b57','#39a0c8','#46b06a','#e6b93a'];
+    for(var i=0;i<5;i++){ px(sctx, ix+5+i*4, iy+5, 2,3, bc[i%4]); }
+    // bench
+    px(sctx, ix+4, ft-7, 26, 7, '#cfd6dd'); px(sctx, ix+4, ft-8, 26, 1, '#eef3f7');
+    // microscope
+    px(sctx, ix+8, ft-13, 2,6,'#39424f'); px(sctx, ix+7, ft-14, 5,2,'#39424f'); px(sctx, ix+9,ft-9,4,2,'#555f70');
+    // beakers
+    px(sctx, ix+18, ft-11, 3,4,'#bfe0e6'); px(sctx, ix+18,ft-9,3,2,'#46b06a');
+    px(sctx, ix+24, ft-10, 2,3,'#bfe0e6'); px(sctx, ix+24,ft-8,2,1,'#d84b57');
+    // big tank on right
+    px(sctx, ix+iw-12, ft-16, 9,16, '#173a40'); px(sctx, ix+iw-11, ft-15, 7,14, '#1f6f74aa'); px(sctx, ix+iw-9, ft-10,3,3,'#7fd0e6');
+  }
+  function furnCorridor(ix,iy,iw,ft,oy,ih,v){
+    // ceiling pipe + round lamps + wall pipe band
+    px(sctx, ix+2, iy+2, iw-4, 2, '#8a949f'); px(sctx, ix+2, iy+2, iw-4, 1, '#a4adb8');
+    for(var lx=ix+10; lx<ix+iw-6; lx+=16){ px(sctx, lx, iy+4, 3,2, '#f2f6c8'); }
+    px(sctx, ix+2, iy+12, iw-4, 1, '#97a2b0'); px(sctx, ix+10, iy+11, 1,3, '#7c8694'); px(sctx, ix+iw-12, iy+11, 1,3, '#7c8694');
+    // doors both sides (lit frame)
+    function door(dx){ px(sctx, dx, ft-16, 8, 16, '#7c8694'); px(sctx, dx+1, ft-15, 6, 14, '#aeb7c4'); px(sctx, dx+3, ft-15,1,14,'#cfd6df'); px(sctx, dx, ft-17,8,1,'#39d0c0'); }
+    door(ix+1); door(ix+iw-9);
+    // back-wall lockers
+    for(var k=0;k<3;k++){ var lxx=ix+12+k*8; px(sctx, lxx, ft-15, 7,15,'#8a949f'); px(sctx, lxx, ft-15,7,1,'#a4adb8'); px(sctx, lxx+5, ft-9,1,1,'#39424f'); }
+    // central floor guide line
+    px(sctx, ix+2, ft+1, iw-4, 1, '#e6b93a');
+    // vending machine sometimes
+    if(v[1]<0.4){ px(sctx, ix+iw-12, ft-16, 9,16,'#b03b2e'); px(sctx, ix+iw-11, ft-15,7,8,'#0e1622'); for(var r=0;r<3;r++)for(var cc=0;cc<2;cc++) px(sctx, ix+iw-10+cc*3, ft-14+r*2,2,1,['#e6b93a','#39a0c8'][(r+cc)%2]); }
+  }
+
+  function wallDecor(ix,iy,iw,ih,ft,v,type){
+    // place up to 2 small items on the clear upper wall (right side bias)
+    function poster(x,y,col){ px(sctx,x,y,8,6,'#2c3340'); px(sctx,x+1,y+1,6,4,col); px(sctx,x+1,y+1,6,1,'#ffffff30'); }
+    function wscreen(x,y,col){ px(sctx,x,y,9,6,'#10181f'); px(sctx,x+1,y+1,7,4,col); px(sctx,x+2,y+2,3,1,'#ffffff55'); }
+    function clock(x,y){ px(sctx,x,y,5,5,'#e9ecf0'); px(sctx,x,y,5,5,'#cfd6de'); px(sctx,x+1,y+1,3,3,'#ffffff'); px(sctx,x+2,y+2,1,1,'#2c3340'); px(sctx,x+2,y+1,1,1,'#2c3340'); }
+    function vent(x,y){ px(sctx,x,y,8,5,'#9aa3b0'); for(var i=0;i<4;i++) px(sctx,x+1,y+1+i,6,1, i%2?'#7c8694':'#aeb7c2'); }
+    function shelf(x,y){ px(sctx,x,y+4,10,1,'#b9a07a'); px(sctx,x+1,y,2,4,'#d84b57'); px(sctx,x+4,y+1,2,3,'#39a0c8'); px(sctx,x+7,y,2,4,'#46b06a'); }
+    var rx=ix+iw-16, ry=iy+4;
+    var a=(v[3]*5)|0;
+    if(a===0) poster(rx,ry, ['#e8743b','#39a0c8','#8e57c9','#46b06a'][(v[4]*4)|0]);
+    else if(a===1) wscreen(rx,ry, ['#39d0c0','#e6b93a','#d84b57'][(v[4]*3)|0]);
+    else if(a===2) clock(rx+2,ry);
+    else if(a===3) vent(rx,ry);
+    else shelf(rx,ry);
+    // second item on left-mid sometimes (avoid where main furniture/monitor sits)
+    if(v[5]<0.4 && (type==='corridor'||type==='gym'||type==='lab'||type==='kitchen')){ vent(ix+iw/2-2|0, iy+3); }
+  }
+
+  // ---------- characters ----------
+  function drawPet(g,x,y,a,t){
+    var ph=t*0.004*a.spd + a.ph; var bob=Math.sin(ph*6)>0?0:1;
+    g.fillStyle=a.col; g.fillRect((x-3)|0,(y-3)|0,6,3); // body
+    g.fillRect((x+ (a.dir>0?2:-3))|0,(y-4)|0,2,2); // head
+    g.fillRect((x-3)|0,(y-1+bob)|0,1,1); g.fillRect((x+1)|0,(y-1)|0,1,1); // legs
+    g.fillStyle='#00000055'; g.fillRect((x-3)|0,(y)|0,6,1);
+  }
+
+  function drawCrew(g,x,y,a,t){
+    var ph=t*0.006*a.spd*cfg.liveliness + a.ph;
+    var suit=a.suit, skin=a.skin, hair=a.hair, dir=a.dir;
+    function R(dx,dy,w,h,col){ g.fillStyle=col; g.fillRect((x+dx*dir - (dir<0?(w-1):0))|0,(y+dy)|0,w,h); }
+    // shadow
+    g.fillStyle='#00000033'; g.fillRect((x-3)|0,(y)|0,7,1);
+
+    if(a.bot){ // little robot
+      R(-3,-12,7,8,'#9aa6b8'); R(-3,-12,7,2,'#c2ccda'); // body
+      R(-2,-15,5,3,'#7f8aa0'); R(-1,-14,1,1,(Math.sin(ph*4)>0?'#39d0c0':'#1c6f72')); // head + eye
+      R(-3,-4,2,4,'#5a6172'); R(1,-4,2,4,'#5a6172');
+      var w=Math.sin(ph*8)*1; R(2,-10,2,1,'#7f8aa0');
+      return;
+    }
+    if(a.act==='sleep'){
+      // lying horizontal on a pod
+      g.fillStyle=suit; g.fillRect((x-9)|0,(y-3)|0,16,4);
+      g.fillStyle=skin; g.fillRect((x+5)|0,(y-4)|0,3,3);
+      g.fillStyle=hair; g.fillRect((x+5)|0,(y-5)|0,3,1);
+      g.fillStyle='#ffffff'; g.fillStyle='#cfe6ff';
+      var zp=(t*0.002+a.ph)%3;
+      g.fillStyle='#d6e6ff'; g.fillRect((x-10 - zp*2)|0,(y-7-zp*2)|0,1,1);
+      return;
+    }
+    var legA=0, lean=0, armA=0, by=0;
+    if(a.act==='walk'){ legA=Math.sin(ph*6); }
+    else if(a.act==='run'){ legA=Math.sin(ph*14); lean=1; }
+    else if(a.act==='work'){ armA=Math.sin(ph*5)>0?1:0; by=(Math.sin(ph*2)>0?0:0); }
+    else if(a.act==='lift'){ armA=Math.sin(ph*4); }
+    else if(a.act==='tend'){ by=(Math.sin(ph*3)>0?0:1); }
+    else if(a.act==='sit'){ /* seated */ }
+
+    if(a.act==='sit'){
+      // seated figure, base (hips) at y
+      g.fillStyle='#2c3340'; g.fillRect((x + (dir>0?1:-3))|0,(y-1)|0,3,1);        // shins forward
+      g.fillStyle='#2c3340'; g.fillRect((x-2)|0,(y-2)|0,5,2);                       // thighs on seat
+      g.fillStyle=suit; g.fillRect((x-2)|0,(y-9)|0,5,7);                            // torso
+      g.fillStyle='#ffffff18'; g.fillRect((x-2)|0,(y-9)|0,5,1);
+      g.fillStyle=suit; g.fillRect((x+(dir>0?3:-3))|0,(y-7)|0,1,3);                 // arm
+      g.fillStyle=skin; g.fillRect((x-1)|0,(y-13)|0,4,4);                           // head
+      g.fillStyle=hair; g.fillRect((x-1)|0,(y-14)|0,4,2); g.fillRect((x-1+(dir>0?0:3))|0,(y-13)|0,1,2);
+      return;
+    }
+
+    // standing base
+    var l1 = legA>0? -1:0, l2 = legA>0?0:-1;
+    g.fillStyle='#2c3340';
+    g.fillRect((x-2)|0,(y-4+ (a.act==='run'?l1:0))|0,2,4);
+    g.fillRect((x+1)|0,(y-4+ (a.act==='run'?l2:0))|0,2,4);
+    if(a.act==='walk'){ g.fillRect((x-2 - (legA>0?1:0))|0,(y-4)|0,2,4); g.fillRect((x+1 + (legA>0?0:1))|0,(y-4)|0,2,4); }
+    // torso
+    g.fillStyle=suit; g.fillRect((x-2)|0,(y-11- by)|0,5,8);
+    g.fillStyle='#ffffff18'; g.fillRect((x-2)|0,(y-11-by)|0,5,1);
+    // arms
+    g.fillStyle=suit;
+    if(a.act==='lift'){ var ah=Math.round(armA*2); g.fillRect((x-3)|0,(y-12-ah)|0,1,3); g.fillRect((x+3)|0,(y-12-ah)|0,1,3); g.fillStyle='#39424f'; g.fillRect((x-4)|0,(y-13-ah)|0,3,1); g.fillRect((x+2)|0,(y-13-ah)|0,3,1); }
+    else if(a.act==='work'){ g.fillRect((x+(dir>0?3:-3))|0,(y-9- (armA))|0,1,3); }
+    else { g.fillRect((x-3)|0,(y-10)|0,1,3); g.fillRect((x+3)|0,(y-10)|0,1,3); }
+    // head
+    g.fillStyle=skin; g.fillRect((x-1)|0,(y-15-by)|0,4,4);
+    g.fillStyle=hair; g.fillRect((x-1)|0,(y-16-by)|0,4,2); g.fillRect((x-1 + (dir>0?0:3))|0,(y-15-by)|0,1,2);
+  }
+
+  // ---------- frame ----------
+  function frame(t){
+    if(lastT<0) lastT=t;
+    var dt=t-lastT; lastT=t;
+    if(cfg.pan && !paused) camPos += dt/1000*cfg.panSpeed;
+    var cam = ((camPos%worldW)+worldW)%worldW;
+
+    // exterior bg
+    octx.fillStyle=C.space; octx.fillRect(0,0,artW,artH);
+    // stars parallax (visible above roof)
+    if(cfg.stars){ var sp=(cam*0.3); octx.fillStyle=C.star;
+      for(var i=0;i<stars.length;i++){ var s=stars[i]; var sx=((s.x - sp)%artW+artW)%artW; octx.fillRect(sx|0,s.y|0,s.b,s.b); } }
+
+    var startCol=Math.floor(cam/ROOM_W);
+    var offX = cam - startCol*ROOM_W;
+    var colsVis=Math.ceil(artW/ROOM_W)+2;
+    // scenery
+    for(var k=-1;k<colsVis;k++){
+      var sc=(((startCol+k)%N)+N)%N;
+      var screenX=Math.round(k*ROOM_W - offX);
+      octx.drawImage(strip, sc*ROOM_W, 0, ROOM_W, stripH, screenX, 0, ROOM_W, stripH);
+    }
+    // characters on top
+    for(var k=-1;k<colsVis;k++){
+      var sc=(((startCol+k)%N)+N)%N;
+      var screenX=Math.round(k*ROOM_W - offX);
+      for(var d=0; d<decks; d++){
+        var deckY=TOP_MARGIN + d*ROOM_H;
+        var room=rooms[sc][d]; var ags=room.ags;
+        for(var ai=0; ai<ags.length; ai++){
+          var a=ags[ai];
+          var ax=screenX+WALL, ay=deckY;
+          if(a.pet){ var px2 = WALL + a.x + Math.sin(t*0.0006+a.ph)*10; drawPet(octx, screenX+px2, deckY+a.y, a, t); continue; }
+          var lx=a.x;
+          if(a.act==='walk'){ var rangeW=ROOM_W-WALL*2-8; var tt=(t*0.02*a.spd*cfg.liveliness + a.ph*30); var u=(tt%(rangeW*2)); lx = u<rangeW? 4+u : 4+(rangeW*2-u); a.dir = (u<rangeW)?1:-1; }
+          drawCrew(octx, screenX+WALL+lx, deckY+a.y, a, t);
+        }
+      }
+    }
+
+    // upscale to visible canvas
+    setSmooth(ctx);
+    ctx.drawImage(off, 0,0, artW,artH, 0,0, canvas.width, canvas.height);
+  }
+
+  // ---------- loop ----------
+  function loop(){
+    if(!running) return;
+    var now=win.performance?win.performance.now():Date.now();
+    raf=win.requestAnimationFrame(loop);
+    var minDt=1000/cfg.fps;
+    if(now - (loop._last||0) < minDt) return;
+    loop._last=now;
+    frame(now);
+  }
+
+  return {
+    start:function(){ if(running) return; layout(); running=true; lastT=-1; raf=win.requestAnimationFrame(loop); },
+    stop:function(){ running=false; if(raf) win.cancelAnimationFrame(raf); },
+    pause:function(p){ paused=p; },
+    resize:function(){ layout(); },
+    setConfig:function(c){ var reLayout = (c.zoom!=null&&c.zoom!==cfg.zoom); Object.assign(cfg,c); if(reLayout) layout(); },
+    _frame:frame, _layout:layout,
+    _info:function(){ return {PX:PX,artW:artW,artH:artH,decks:decks}; }
+  };
+}
+if(typeof module!=='undefined') module.exports={createFloor796Engine:createFloor796Engine};
+</script>
+<script>
+(function(){
+  var cv=document.getElementById('cv');
+  function size(){ cv.width=Math.max(640,window.innerWidth); cv.height=Math.max(360,window.innerHeight); }
+  size();
+  var cfg={pan:true,panSpeed:14,liveliness:1.0,zoom:1.0,fps:30,stars:true};
+  var eng=createFloor796Engine(cv,cfg,window);
+  eng.start();
+  window.addEventListener('resize',function(){ size(); eng.resize(); });
+
+  function bindRange(id,key,fmt){ var el=document.getElementById(id),v=document.getElementById('v'+id.charAt(0).toUpperCase()+id.slice(1));
+    function up(){ var n=parseFloat(el.value); cfg[key]=n; if(v) v.textContent=fmt?fmt(n):n; eng.setConfig(cfg); showJSON(); }
+    el.addEventListener('input',up); up(); }
+  function bindToggle(id,key){ var el=document.getElementById(id); function up(){ cfg[key]=el.checked; eng.setConfig(cfg); showJSON(); } el.addEventListener('change',up); }
+  bindRange('panSpeed','panSpeed');
+  bindRange('liveliness','liveliness',function(n){return n.toFixed(1);});
+  bindRange('zoom','zoom',function(n){return n.toFixed(2);});
+  bindRange('fps','fps');
+  bindToggle('pan','pan'); bindToggle('stars','stars');
+
+  function showJSON(){ document.getElementById('json').value=JSON.stringify(cfg); }
+  showJSON();
+  document.getElementById('copy').addEventListener('click',function(){ var t=document.getElementById('json'); t.select(); try{document.execCommand('copy');}catch(e){} this.textContent='Copied ✓'; var b=this; setTimeout(function(){b.textContent='Copy settings JSON';},1200); });
+
+  var panel=document.getElementById('panel'),chip=document.getElementById('toggleP');
+  function setPanel(v){ panel.style.display=v?'block':'none'; chip.style.display=v?'none':'block'; }
+  chip.addEventListener('click',function(){setPanel(true);});
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape') setPanel(panel.style.display==='none'); });
+})();
+</script>
+<script id="card-resize-kick">
+(function(){function k(){try{window.dispatchEvent(new Event('resize'));}catch(e){}}
+window.addEventListener('load',function(){k();setTimeout(k,60);setTimeout(k,300);setTimeout(k,1000);});
+if(document.readyState!=='loading'){k();setTimeout(k,300);}})();
+</script>
+</body></html>

@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>A* Grid Pathfinder — preview (ship engine)</title>
+<style>
+  html,body{margin:0;height:100%;background:#060d16;overflow:hidden;
+    font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;color:#bfefff}
+  #c{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);display:block;background:#000;
+    box-shadow:0 0 0 1px #15384a, 0 0 50px rgba(0,0,0,.7)}
+  #ui{position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:10;
+    display:flex;gap:7px;flex-wrap:wrap;align-items:center;justify-content:center;
+    background:rgba(8,18,30,.82);border:1px solid #15384a;border-radius:10px;
+    padding:7px 9px;backdrop-filter:blur(4px);max-width:97vw}
+  .grp{display:flex;gap:5px;align-items:center;padding:0 7px;border-right:1px solid #173a4c}
+  .grp:last-child{border-right:none}
+  .lab{font-size:9px;letter-spacing:1px;color:#4f7e90;text-transform:uppercase}
+  button{font:inherit;font-size:12px;color:#bfefff;background:#0c2233;border:1px solid #1d4d63;
+    border-radius:6px;padding:4px 8px;cursor:pointer;transition:.12s}
+  button:hover{background:#10384f}
+  button.on{background:#16d6ff;color:#02151f;border-color:#16d6ff;font-weight:700}
+  .sl{display:flex;flex-direction:column;align-items:center;gap:1px}
+  .sl input{width:74px;accent-color:#16d6ff}
+  .sl .v{font-size:9px;color:#7fb8c8}
+  #cap{position:fixed;left:14px;bottom:12px;z-index:10;font-size:11px;line-height:1.5;
+    color:#7fb8c8;max-width:54ch;background:rgba(8,18,30,.6);padding:7px 11px;
+    border-left:2px solid #16d6ff;border-radius:0 6px 6px 0}
+  .swatch{width:18px;height:18px;border-radius:4px;border:1px solid #2a5a6e;cursor:pointer;padding:0}
+  .swatch.on{outline:2px solid #fff;outline-offset:1px}
+  #toast{position:fixed;top:58px;left:50%;transform:translateX(-50%);z-index:20;background:#0c2233;
+    border:1px solid #16d6ff;color:#bfefff;padding:6px 12px;border-radius:6px;font-size:12px;
+    opacity:0;transition:opacity .25s;pointer-events:none}
+  #toast.show{opacity:1}
+</style>
+<style id="card-clean">
+html,body{margin:0!important;padding:0!important;width:100%!important;height:100%!important;overflow:hidden!important;background:#000!important;pointer-events:none!important;cursor:default!important}
+#panel,.panel,#ui,.menubar,.controls,.toolbar,.legend,.hud,.menu,details,form,h1,h2,.title{display:none!important}
+input,label,button,select,textarea{display:none!important}
+.wrap{display:block!important;position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;margin:0!important;padding:0!important;gap:0!important;grid-template-columns:none!important;grid-template-rows:none!important}
+#stage,.stage{position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;margin:0!important;padding:0!important;border:0!important;border-radius:0!important;box-shadow:none!important;max-width:none!important;max-height:none!important}
+#cv,canvas{width:100%!important;height:100%!important;border-radius:0!important;display:block!important}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui">
+  <div class="grp"><span class="lab">Cadence</span>
+    <button id="cCalm" class="on">Calm</button><button id="cCont">Continuous</button></div>
+  <div class="grp"><span class="lab">Moves</span>
+    <button id="d4" class="on">4-dir</button><button id="d8">8-dir</button></div>
+  <div class="grp"><span class="lab">Keep-out</span>
+    <button id="koOff" class="on">Off</button><button id="koOn">Center</button></div>
+  <div class="grp"><span class="lab">Pattern</span>
+    <button id="pScat" class="on">Scatter</button><button id="pMaze">Maze</button></div>
+  <div class="grp"><span class="lab">Target ripple</span>
+    <button id="prOn" class="on">On</button><button id="prOff">Off</button></div>
+  <div class="grp"><span class="lab">Preset</span>
+    <button id="exp">⤓ Export</button><button id="imp">⤒ Import</button></div>
+  <div class="grp">
+    <label class="sl">Search<input id="sSpeed" type="range" min="30" max="360" value="30"><span class="v" id="vSpeed">0.3×</span></label>
+    <label class="sl">Density<input id="sDens" type="range" min="60" max="300" value="200"><span class="v" id="vDens">200%</span></label>
+    <label class="sl">Obstacles<input id="sObs" type="range" min="0" max="85" value="38"><span class="v" id="vObs">38%</span></label>
+    <label class="sl">Glow<input id="sGlow" type="range" min="0" max="100" value="10"><span class="v" id="vGlow">10%</span></label>
+  </div>
+  <div class="grp" id="themeGrp"><span class="lab">Theme</span></div>
+  <div class="grp"><button id="regen">↻ New grid</button></div>
+</div>
+<div id="cap"></div>
+<div id="toast"></div>
+<script>
+"use strict";
+/* ============================================================
+   A* GRID PATHFINDER — ship engine (preview == device).
+   Regular lattice · A* search reveal (open/closed expanding
+   toward target) · obstacle blobs · glowing path line on
+   success (downscale-blur, no lightning). Everything above CFG
+   becomes createEngine(canvas,cfg,win) for the Decky plugin.
+   ============================================================ */
+
+let CFG = {
+  cadence:'calm', searchSpeed:0.3, density:2.0,
+  obstacles:0.38, diag:true,  glow:0.10, keepout:false, theme:1, pattern:'scatter', prize:true
+};
+const THEMES = [
+  {name:'Default', glow:'#23dcff', core:'#e9feff', dim:'#2c6f86', wall:'#0d2230', bg:'#070f1a', grid:'rgba(40,120,150,0.07)', trace:'#8eeeff'},
+  {name:'Matrix',  glow:'#21ff5f', core:'#d6ffdc', dim:'#1c5a2e', wall:'#06160c', bg:'#010600', grid:'rgba(0,255,80,0.07)', trace:'#ffe000', route:'#ffe000'},
+  {name:'Rainbow', glow:'#ffffff', core:'#ffffff', dim:'#9aa0aa', wall:'#e4e4ec', bg:'#ffffff', grid:'rgba(0,0,0,0)', trace:'#0b5cff', route:'#0b5cff', label:'#101014', rainbow:true, light:true}
+];
+
+// ---------- canvas + glow buffer ----------
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d',{alpha:false});
+const glowCv = document.createElement('canvas');
+const gctx = glowCv.getContext('2d');
+const GS = 0.34;
+let W=0,H=0,DPR=1;
+const DEV_W=1920, DEV_H=1080;                 // ROG Xbox Ally X panel (16:9 1080p)
+function resize(){
+  DPR=1; W=DEV_W; H=DEV_H;                     // render at true device resolution
+  cv.width=W; cv.height=H; ctx.setTransform(1,0,0,1,0,0);
+  glowCv.width=Math.max(1,Math.round(W*GS)); glowCv.height=Math.max(1,Math.round(H*GS));
+  gctx.imageSmoothingEnabled=true; ctx.imageSmoothingEnabled=true;
+  fitCSS();
+}
+function fitCSS(){                              // scale the 1920x1080 canvas to fit the browser, keep 16:9
+  const scale=Math.min(window.innerWidth/W, window.innerHeight/H);
+  cv.style.width=(W*scale)+'px'; cv.style.height=(H*scale)+'px';
+}
+window.addEventListener('resize', fitCSS);
+function hexA(hex,a){ const n=parseInt(hex.slice(1),16);
+  return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`; }
+
+// ---------- grid ----------
+let cols=0,rows=0,cell=0,ox=0,oy=0,wall=null;
+const idx=(c,r)=>r*cols+c;
+const cx=c=>ox+c*cell+cell/2, cyf=r=>oy+r*cell+cell/2;
+function buildGrid(){
+  const baseCell=Math.max(14, Math.min(46, Math.min(W,H)/24));
+  cell=Math.max(9, baseCell/CFG.density);
+  cols=Math.max(6,Math.floor(W/cell)); rows=Math.max(6,Math.floor(H/cell));
+  ox=(W-cols*cell)/2; oy=(H-rows*cell)/2;
+  // obstacle blobs via random fill + cellular-automata smoothing
+  const n=cols*rows; wall=new Uint8Array(n);
+  if(CFG.pattern==='maze'){
+    // perfect maze via recursive backtracker on even-coord rooms (Obstacles slider ignored)
+    for(let i=0;i<n;i++) wall[i]=1;
+    const inb=(c,r)=>c>=0&&r>=0&&c<cols&&r<rows;
+    const st=[[0,0]]; wall[idx(0,0)]=0;
+    const dirs=[[2,0],[-2,0],[0,2],[0,-2]];
+    while(st.length){
+      const [c,r]=st[st.length-1];
+      const ds=dirs.slice().sort(()=>Math.random()-0.5); let moved=false;
+      for(const [dc,dr] of ds){ const nc=c+dc,nr=r+dr;
+        if(inb(nc,nr)&&wall[idx(nc,nr)]===1){ wall[idx(c+dc/2,r+dr/2)]=0; wall[idx(nc,nr)]=0; st.push([nc,nr]); moved=true; break; } }
+      if(!moved) st.pop();
+    }
+    // braid: punch ~12% of dead-ends so the maze has a few loops (A* gets choices)
+    const nb=[[1,0],[-1,0],[0,1],[0,-1]];
+    for(let r=1;r<rows-1;r++)for(let c=1;c<cols-1;c++){ if(wall[idx(c,r)]) continue;
+      let open=0; for(const [dc,dr] of nb){ const cc=c+dc,rr=r+dr; if(inb(cc,rr)&&!wall[idx(cc,rr)]) open++; }
+      if(open===1 && Math.random()<0.12){
+        const cand=nb.map(([dc,dr])=>[c+dc,r+dr]).filter(([cc,rr])=>cc>0&&rr>0&&cc<cols-1&&rr<rows-1&&wall[idx(cc,rr)]);
+        if(cand.length){ const [cc,rr]=cand[(Math.random()*cand.length)|0]; wall[idx(cc,rr)]=0; }
+      }
+    }
+  } else {                                  // scatter
+    const fill = CFG.obstacles*0.92;
+    for(let i=0;i<n;i++) wall[i]=Math.random()<fill?1:0;
+    const nx=new Uint8Array(n);              // one de-noise pass keeps it scattered
+    for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+      let w=0;
+      for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){
+        if(!dr&&!dc)continue; const cc=c+dc,rr=r+dr;
+        if(cc<0||rr<0||cc>=cols||rr>=rows){ w++; continue; }
+        w+=wall[idx(cc,rr)];
+      }
+      nx[idx(c,r)] = (w<=1)?0:(w>=8?1:wall[idx(c,r)]);
+    }
+    wall=nx;
+  }
+  // keep-out: a dark wall band across the centre (with a couple gaps)
+  if(CFG.keepout){
+    const r0=Math.floor(rows*0.40), r1=Math.floor(rows*0.60);
+    const gap1=Math.floor(cols*0.30), gap2=Math.floor(cols*0.68);
+    for(let r=r0;r<=r1;r++)for(let c=0;c<cols;c++){
+      const open=(Math.abs(c-gap1)<=1)||(Math.abs(c-gap2)<=1);
+      wall[idx(c,r)]= open?0:1;
+    }
+  }
+}
+
+// ---------- A* ----------
+let srcI=0,dstI=0;
+function passable(i){ return wall[i]===0; }
+function carveOpen(i){ wall[i]=0; }
+function neighbors(i){
+  const c=i%cols, r=(i-c)/cols, out=[];
+  const orth=[[1,0],[-1,0],[0,1],[0,-1]];
+  for(const [dc,dr] of orth){ const cc=c+dc,rr=r+dr;
+    if(cc>=0&&rr>=0&&cc<cols&&rr<rows&&passable(idx(cc,rr))) out.push([idx(cc,rr),1]); }
+  if(CFG.diag){
+    const dia=[[1,1],[1,-1],[-1,1],[-1,-1]];
+    for(const [dc,dr] of dia){ const cc=c+dc,rr=r+dr;
+      if(cc<0||rr<0||cc>=cols||rr>=rows) continue;
+      if(!passable(idx(cc,rr))) continue;
+      if(!passable(idx(c+dc,r))||!passable(idx(c,r+dr))) continue; // no corner cutting
+      out.push([idx(cc,rr),1.41421356]);
+    }
+  }
+  return out;
+}
+function heur(a,b){
+  const ac=a%cols,ar=(a-ac)/cols, bc=b%cols,br=(b-bc)/cols;
+  const dx=Math.abs(ac-bc),dy=Math.abs(ar-br);
+  const h = CFG.diag ? (dx+dy)+(1.41421356-2)*Math.min(dx,dy) : (dx+dy);
+  return h*1.002; // tiny tie-breaker -> straighter, prettier reveal
+}
+function astar(s,t){
+  const n=cols*rows;
+  const g=new Float64Array(n).fill(Infinity);
+  const f=new Float64Array(n).fill(Infinity);
+  const came=new Int32Array(n).fill(-1);
+  const closed=new Uint8Array(n), inOpen=new Uint8Array(n);
+  const open=[]; const order=[];
+  g[s]=0; f[s]=heur(s,t); open.push(s); inOpen[s]=1;
+  while(open.length){
+    // pop min f
+    let bi=0; for(let k=1;k<open.length;k++) if(f[open[k]]<f[open[bi]]) bi=k;
+    const u=open[bi]; open[bi]=open[open.length-1]; open.pop(); inOpen[u]=0;
+    if(closed[u]) continue;
+    closed[u]=1; order.push(u);
+    if(u===t) break;
+    for(const [v,w] of neighbors(u)){
+      if(closed[v]) continue;
+      const ng=g[u]+w;
+      if(ng<g[v]){ g[v]=ng; f[v]=ng+heur(v,t); came[v]=u;
+        if(!inOpen[v]){ open.push(v); inOpen[v]=1; } }
+    }
+  }
+  const path=[]; if(came[t]!==-1||s===t){ let c=t; while(c!==-1){ path.unshift(c); c=came[c]; } }
+  return {order,came,path};
+}
+function pickEnds(){                      // random source/target, far apart -> varied spawn each cycle
+  const pass=[];
+  for(let i=0;i<wall.length;i++) if(passable(i)) pass.push(i);
+  if(pass.length<2){ carveOpen(idx(1,1)); carveOpen(idx(cols-2,rows-2)); srcI=idx(1,1); dstI=idx(cols-2,rows-2); return; }
+  const md=(a,b)=>{ const ac=a%cols,ar=(a-ac)/cols,bc=b%cols,br=(b-bc)/cols; return Math.abs(ac-bc)+Math.abs(ar-br); };
+  const minD=(cols+rows)*0.55;            // require a good span so the route is interesting
+  let bestS=pass[0],bestT=pass[1],bestD=-1;
+  for(let t=0;t<28;t++){
+    const a=pass[(Math.random()*pass.length)|0], b=pass[(Math.random()*pass.length)|0];
+    const d=md(a,b);
+    if(d>=minD){ srcI=a; dstI=b; return; }
+    if(d>bestD){ bestD=d; bestS=a; bestT=b; }
+  }
+  srcI=bestS; dstI=bestT;
+}
+
+// ---------- run state ----------
+let phase='search', t0=0, run={}, prizeStart=-1, prizeStartSrc=-1;
+function carveCorridor(s,t){           // organic drunkard tunnel, keeps obstacles dense
+  let c=s%cols, r=(s-c)/cols; const tc=t%cols, tr=(t-(t%cols))/cols;
+  let steps=0, max=cols*rows*2;
+  while((c!==tc||r!==tr) && steps++<max){
+    wall[idx(c,r)]=0;
+    if(Math.random()<0.74){ if(Math.abs(tc-c)>Math.abs(tr-r)) c+=Math.sign(tc-c); else r+=Math.sign(tr-r); }
+    else { if(Math.random()<0.5) c+=(Math.random()<0.5?1:-1); else r+=(Math.random()<0.5?1:-1); }
+    c=Math.max(0,Math.min(cols-1,c)); r=Math.max(0,Math.min(rows-1,r));
+  }
+  wall[idx(tc,tr)]=0;
+}
+function resetRun(){
+  pickEnds();
+  run=astar(srcI,dstI);
+  let tries=0;
+  while(run.path.length<2 && tries<6){
+    tries++;
+    if(tries<=2){ pickEnds(); }                 // first try fresh endpoints
+    else { carveOpen(srcI); carveOpen(dstI); carveCorridor(srcI,dstI); } // then guarantee a route
+    run=astar(srcI,dstI);
+  }
+  run.k=run.order.length;
+  phase='search'; t0=performance.now();
+}
+
+// ---------- draw ----------
+function background(){
+  ctx.fillStyle=THEMES[CFG.theme].bg; ctx.fillRect(0,0,W,H);
+  // faint grid lines (the "grid-like pattern")
+  ctx.lineWidth=1; ctx.strokeStyle=THEMES[CFG.theme].grid;
+  ctx.beginPath();
+  for(let c=0;c<=cols;c++){ const x=ox+c*cell; ctx.moveTo(x,oy); ctx.lineTo(x,oy+rows*cell); }
+  for(let r=0;r<=rows;r++){ const y=oy+r*cell; ctx.moveTo(ox,y); ctx.lineTo(ox+cols*cell,y); }
+  ctx.stroke();
+  const g=ctx.createRadialGradient(W/2,H/2,Math.min(W,H)*0.2,W/2,H/2,Math.max(W,H)*0.72);
+  g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(1, THEMES[CFG.theme].light?'rgba(255,255,255,0)':'rgba(2,6,12,0.85)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+}
+function fillCell(i,style){ const c=i%cols,r=(i-c)/cols;
+  ctx.fillStyle=style; ctx.fillRect(ox+c*cell+0.5,oy+r*cell+0.5,cell-1,cell-1); }
+function drawBlock(i,a,bright){            // solid route block (theme route colour; white by default)
+  const P=THEMES[CFG.theme], c=i%cols, r=(i-c)/cols, x=ox+c*cell, y=oy+r*cell, sgn=cell;
+  const pad=Math.max(0.3,sgn*0.04), rad=Math.max(1,sgn*0.18);
+  ctx.beginPath(); ctx.roundRect(x+pad,y+pad,sgn-2*pad,sgn-2*pad,rad);
+  ctx.fillStyle=hexA(P.route||'#ffffff', a); ctx.fill();
+}
+function badge(x,y,txt,col){
+  ctx.font='11px ui-monospace,monospace';
+  const w=ctx.measureText(txt).width+14;
+  ctx.fillStyle=THEMES[CFG.theme].light?'rgba(255,255,255,0.92)':'rgba(6,16,26,0.92)'; ctx.strokeStyle=col; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.roundRect(x-w/2,Math.max(11,y)-9,w,18,4); ctx.fill(); ctx.stroke();
+  ctx.fillStyle=col; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(txt,x,Math.max(11,y)); ctx.textAlign='left';
+}
+function durs(){ const calm=CFG.cadence==='calm', sp=CFG.searchSpeed;   // sp scales the SEARCH reveal only
+  return { search:(calm?1700:900)/sp, hold:(calm?3200:900), fade:(calm?900:380), gap:(calm?500:120) }; }
+
+function frame(now){
+  const P=THEMES[CFG.theme], D=durs(), el=now-t0;
+  background();
+
+  // walls
+  for(let i=0;i<wall.length;i++) if(wall[i]) fillCell(i,P.wall);
+
+  // how many cells explored so far
+  let k=run.k;
+  if(phase==='search') k=Math.min(run.k, Math.floor(run.k*(el/D.search)));
+  let resultA=1;                                   // fades explored+route+labels out together (seamless regen)
+  if(phase==='fade') resultA=Math.max(0,1-(el/D.fade));
+  else if(phase==='gap') resultA=0;
+
+  // closed set (explored), recency-tinted
+  for(let q=0;q<k;q++){ const i=run.order[q]; const t=q/Math.max(1,k);
+    if(P.rainbow){ const hue=(t*330)|0, a=Math.min(0.96,0.55+0.4*t)*resultA;
+      fillCell(i, 'hsla('+hue+',100%,50%,'+a.toFixed(3)+')'); }
+    else { const a=(0.06+0.20*t)*resultA; fillCell(i, hexA(P.glow,a)); }
+  }
+  // frontier ring (most recent reveals)
+  const fr=Math.max(1,Math.floor(run.k*0.05));
+  for(let q=Math.max(0,k-fr);q<k;q++){ const i=run.order[q],c=i%cols,r=(i-c)/cols;
+    ctx.strokeStyle=hexA(P.core,0.6*resultA); ctx.lineWidth=1.2;
+    ctx.strokeRect(ox+c*cell+1,oy+r*cell+1,cell-2,cell-2);
+  }
+
+  // endpoints
+  fillCell(srcI, hexA(P.core,0.85*resultA)); fillCell(dstI, hexA(P.glow,0.85*resultA));
+
+  // ---- route reveal: SNAKE crawls target->source, then whole route LOCKS to solid white ----
+  function crawlDur(n){ return Math.min(D.hold*0.8, Math.max(600, n*(CFG.cadence==='calm'?70:35))); }
+  if(phase!=='search' && phase!=='gap' && run.path.length>1){
+    const cells=run.path; const L=cells.length;
+    ctx.save(); ctx.globalCompositeOperation='source-over'; ctx.lineJoin='round';
+    if(phase==='strike'){                               // crawling snake (white head -> dim tail)
+      const segLen=Math.max(4, Math.min(16, Math.round(L*0.28)));
+      const p=Math.min(1, el/crawlDur(L)), headIdx=Math.round((L-1)*(1-p));
+      const visible=cells.slice(headIdx, Math.min(L-1, headIdx+segLen-1)+1);
+      for(let q=0;q<visible.length;q++){ const taper=1-(q/Math.max(1,visible.length))*0.72; drawBlock(visible[q], taper, q===0); }
+    } else {                                            // 'lock'/'fade': full route, gradient SOURCE 100% -> TARGET 10%
+      for(let i=0;i<L;i++){ const grad=1-(i/Math.max(1,L-1))*0.9; drawBlock(cells[i], grad*resultA, false); }
+    }
+    ctx.restore();
+  }
+
+  // ---- EXPERIMENT: PIXELATED ripple at the target (on found) and the source (on arrival) ----
+  if(CFG.prize){
+    const ripple=(centerI, st, dur)=>{ if(st<0) return; const pe=now-st; if(pe>=dur) return;
+      const col=P.route||P.core||'#ffffff';
+      const dc0=centerI%cols, dr0=(centerI-(centerI%cols))/cols;
+      const maxRc=Math.max(3,(Math.min(W,H)*0.085)/cell);
+      const rt=pe/dur, R=rt*maxRc, a=(1-rt)*0.8;
+      ctx.save(); ctx.globalCompositeOperation = P.light?'source-over':'lighter';
+      const L=Math.ceil(R)+1;
+      for(let dc=-L;dc<=L;dc++)for(let dr=-L;dr<=L;dr++){
+        const cc=dc0+dc, rr=dr0+dr; if(cc<0||rr<0||cc>=cols||rr>=rows) continue;
+        const d=Math.sqrt(dc*dc+dr*dr);
+        if(Math.abs(d-R)<=0.9) fillCell(idx(cc,rr), hexA(col,a));
+      }
+      if(pe<500) fillCell(centerI, hexA(col,0.7*(1-pe/500)));
+      ctx.restore();
+    };
+    ripple(dstI, prizeStart, 1560);     // target — when A* found it
+    ripple(srcI, prizeStartSrc, 1040);  // source — when snake arrives (60% faster)
+  }
+
+  // labels (fade with the rest)
+  ctx.save(); ctx.globalAlpha=resultA;
+  ctx.font='12px ui-monospace,monospace';
+  if(phase==='search'){ ctx.fillStyle=hexA(P.label||P.glow,0.6);
+    ctx.fillText('◇ A* — '+k+'/'+run.k+' cells explored', 16, H-22); }
+  else if(phase==='strike'||phase==='lock'){ ctx.fillStyle=hexA(P.label||P.glow,0.9);
+    const crawling = phase==='strike' && el < crawlDur(run.path.length);
+    ctx.fillText(crawling?'▸ CRAWLING ROUTE…':'▸ ROUTE LOCKED  ('+(run.path.length-1)+' steps)', 16, H-22); }
+  ctx.restore();
+
+  // transitions
+  if(phase==='search'&&el>=D.search){ phase='strike'; t0=now; prizeStart=now; }
+  else if(phase==='strike'&&el>=crawlDur(run.path.length)){ phase='lock'; t0=now; prizeStartSrc=now; }   // crawl done -> fill whole route white
+  else if(phase==='lock'&&el>=D.hold){ phase='fade'; t0=now; }
+  else if(phase==='fade'&&el>=D.fade){ phase='gap'; t0=now; }
+  else if(phase==='gap'&&el>=D.gap){ buildGrid(); resetRun(); }
+
+  raf=requestAnimationFrame(frame);
+}
+
+// ---------- ui ----------
+function updateCap(){ document.getElementById('cap').innerHTML =
+  '<b>A* grid pathfinder.</b> Regular lattice · A* explores toward the target around obstacles · route glows block-by-block back to source · regenerates. '
+  +'<br><span style="color:#4f7e90">'+CFG.cadence+' · '+(CFG.diag?'8-dir':'4-dir')
+  +' · 1920×1080 ROG Ally X · '+CFG.pattern+' · obstacles '+Math.round(CFG.obstacles*100)+'% · keep-out '+(CFG.keepout?'on':'off')+' · '+THEMES[CFG.theme].name+'</span>'; }
+const PROFKEYS=['cadence','searchSpeed','density','obstacles','diag','keepout','pattern'];
+let PROFILES=THEMES.map(()=>{ const p={}; for(const k of PROFKEYS) p[k]=CFG[k]; return p; });
+function commitProfile(){ const p={}; for(const k of PROFKEYS) p[k]=CFG[k]; PROFILES[CFG.theme]=p; }
+function loadProfile(i){ const p=PROFILES[i]; if(p) for(const k of PROFKEYS) CFG[k]=p[k]; }
+function pick(onId,offId){ document.getElementById(onId).classList.add('on'); document.getElementById(offId).classList.remove('on'); }
+document.getElementById('cCalm').onclick=()=>{CFG.cadence='calm';commitProfile();pick('cCalm','cCont');updateCap();};
+document.getElementById('cCont').onclick=()=>{CFG.cadence='cont';commitProfile();pick('cCont','cCalm');updateCap();};
+document.getElementById('d4').onclick=()=>{CFG.diag=false;commitProfile();pick('d4','d8');resetRun();updateCap();};
+document.getElementById('d8').onclick=()=>{CFG.diag=true;commitProfile();pick('d8','d4');resetRun();updateCap();};
+document.getElementById('koOff').onclick=()=>{CFG.keepout=false;commitProfile();pick('koOff','koOn');buildGrid();resetRun();updateCap();};
+document.getElementById('koOn').onclick=()=>{CFG.keepout=true;commitProfile();pick('koOn','koOff');buildGrid();resetRun();updateCap();};
+function setPattern(p,id){ CFG.pattern=p; commitProfile(); for(const b of ['pScat','pMaze']) document.getElementById(b).classList.toggle('on',b===id); buildGrid(); resetRun(); updateCap(); }
+document.getElementById('pScat').onclick=()=>setPattern('scatter','pScat');
+document.getElementById('pMaze').onclick=()=>setPattern('maze','pMaze');
+document.getElementById('prOn').onclick=()=>{CFG.prize=true;pick('prOn','prOff');};
+document.getElementById('prOff').onclick=()=>{CFG.prize=false;pick('prOff','prOn');};
+const S=(id,fn)=>document.getElementById(id).oninput=fn;
+S('sSpeed',e=>{CFG.searchSpeed=e.target.value/100;commitProfile();document.getElementById('vSpeed').textContent=CFG.searchSpeed.toFixed(1)+'×';});
+S('sDens',e=>{CFG.density=e.target.value/100;commitProfile();document.getElementById('vDens').textContent=e.target.value+'%';buildGrid();resetRun();});
+S('sObs',e=>{CFG.obstacles=e.target.value/100;commitProfile();document.getElementById('vObs').textContent=e.target.value+'%';buildGrid();resetRun();});
+S('sGlow',e=>{CFG.glow=e.target.value/100;document.getElementById('vGlow').textContent=e.target.value+'%';});
+(function buildThemeBtns(){ const g=document.getElementById('themeGrp');
+  THEMES.forEach((t,i)=>{ const b=document.createElement('button'); b.id='th'+i; b.textContent=t.name;
+    if(i===CFG.theme) b.classList.add('on');
+    b.onclick=()=>{ commitProfile(); CFG.theme=i; loadProfile(i); buildGrid(); resetRun(); syncUI(); updateCap(); };
+    g.appendChild(b); }); })();
+document.getElementById('regen').onclick=()=>{ buildGrid(); resetRun(); };
+
+// ---------- presets ----------
+let toastT=0;
+function flash(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show');
+  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),1700); }
+function syncUI(){
+  const set=(id,v)=>{const e=document.getElementById(id); if(e) e.value=v;};
+  const txt=(id,v)=>{const e=document.getElementById(id); if(e) e.textContent=v;};
+  set('sSpeed',Math.round(CFG.searchSpeed*100)); txt('vSpeed',CFG.searchSpeed.toFixed(1)+'×');
+  set('sDens',Math.round(CFG.density*100));       txt('vDens',Math.round(CFG.density*100)+'%');
+  set('sObs',Math.round(CFG.obstacles*100));      txt('vObs',Math.round(CFG.obstacles*100)+'%');
+  set('sGlow',Math.round(CFG.glow*100));          txt('vGlow',Math.round(CFG.glow*100)+'%');
+  const on=(id,v)=>document.getElementById(id).classList.toggle('on',v);
+  on('cCalm',CFG.cadence==='calm'); on('cCont',CFG.cadence==='cont');
+  on('d4',!CFG.diag); on('d8',CFG.diag);
+  on('koOff',!CFG.keepout); on('koOn',CFG.keepout);
+  on('pScat',CFG.pattern==='scatter'); on('pMaze',CFG.pattern==='maze');
+  for(let j=0;j<THEMES.length;j++){ const e=document.getElementById('th'+j); if(e) e.classList.toggle('on',j===CFG.theme); }
+}
+function exportPreset(){
+  commitProfile();
+  const json=JSON.stringify({theme:CFG.theme, glow:CFG.glow, fps:CFG.fps, profiles:PROFILES},null,2);
+  try{ const blob=new Blob([json],{type:'application/json'}); const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download='astar-preset.json'; a.click(); URL.revokeObjectURL(url); }catch(e){}
+  try{ if(navigator.clipboard) navigator.clipboard.writeText(json); }catch(e){}
+  flash('Preset exported — downloaded + copied to clipboard');
+}
+function importPreset(){
+  const txt=prompt('Paste preset JSON:'); if(!txt) return;
+  try{ const o=JSON.parse(txt);
+    if(o.profiles){ PROFILES=o.profiles; if(typeof o.theme==='number') CFG.theme=o.theme; if('glow' in o) CFG.glow=o.glow; loadProfile(CFG.theme); }
+    else Object.assign(CFG,o);
+    syncUI(); buildGrid(); resetRun(); updateCap(); flash('Preset imported'); }
+  catch(e){ flash('Invalid JSON — not imported'); }
+}
+document.getElementById('exp').onclick=exportPreset;
+document.getElementById('imp').onclick=importPreset;
+
+// ---------- go ----------
+let raf=0;
+resize(); buildGrid(); resetRun(); syncUI(); updateCap();
+raf=requestAnimationFrame(frame);
+</script>
+<script id="card-resize-kick">
+(function(){function k(){try{window.dispatchEvent(new Event('resize'));}catch(e){}}
+window.addEventListener('load',function(){k();setTimeout(k,60);setTimeout(k,300);setTimeout(k,1000);});
+if(document.readyState!=='loading'){k();setTimeout(k,300);}})();
+</script>
+</body>
+</html>
